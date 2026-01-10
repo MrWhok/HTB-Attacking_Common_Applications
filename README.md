@@ -631,7 +631,7 @@
             - Click the filter icon
             - Add a rule: Process Name is Restart-OracleService.exe then Include. It will be look like this.
 
-            ![alt text](<Assets/Attacking Thick Client Applications - 1.png>)
+        ![alt text](<Assets/Attacking Thick Client Applications - 1.png>)
         
         Once we have applied the the filter/rule, we can click capture button again to start capturing and run `Restart-OracleService.exe`.
 
@@ -744,9 +744,7 @@
         ```powershell
         ls fatty-client\ -recurse | Select-String "8000" | Select Path, LineNumber | Format-List
         ```
-        ![alt text](<Assets/Exploiting Web Vulnerabilities in Thick-Client Applications - 1.png>)
-
-        We have found that `beans.xml` contain string 8000. Here the content of it.
+        We will found out that `beans.xml` contain string 8000. Here the content of it.
 
         ```xml
         <?xml version = "1.0" encoding = "UTF-8"?>
